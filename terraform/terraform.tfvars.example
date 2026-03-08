@@ -1,0 +1,4 @@
+aws_region        = "us-east-1"
+key_pair_name     = "your-ec2-keypair-name"
+anthropic_api_key = "sk-ant-..."
+allowed_ssh_cidr  = "YOUR_IP/32"
