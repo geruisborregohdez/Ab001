@@ -27,10 +27,9 @@ def _serialize(obj) -> dict:
 
 # ── Customer tools ──────────────────────────────────────────────────────────
 
-async def tool_create_customer(db: AsyncSession, name: str, email: str | None = None,
-                                phone: str | None = None, address_street: str | None = None,
-                                address_city: str | None = None, address_state: str | None = None,
-                                address_zip: str | None = None) -> dict:
+async def tool_create_customer(db: AsyncSession, name: str, email: str,
+                                phone: str, address_street: str, address_city: str,
+                                address_state: str, address_zip: str) -> dict:
     repo = CustomerRepository(db)
     customer = await repo.create(
         name=name, email=email, phone=phone,
@@ -148,7 +147,7 @@ TOOL_DEFINITIONS = [
                 "address_state": {"type": "string"},
                 "address_zip": {"type": "string"},
             },
-            "required": ["name"],
+            "required": ["name", "email", "phone", "address_street", "address_city", "address_state", "address_zip"],
         },
     },
     {

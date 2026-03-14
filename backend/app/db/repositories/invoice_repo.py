@@ -48,7 +48,7 @@ class InvoiceRepository:
     async def get(self, invoice_id: int) -> Invoice | None:
         result = await self.db.execute(
             select(Invoice)
-            .options(selectinload(Invoice.line_items))
+            .options(selectinload(Invoice.line_items), selectinload(Invoice.customer))
             .where(Invoice.id == invoice_id)
         )
         return result.scalar_one_or_none()

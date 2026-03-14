@@ -34,6 +34,7 @@ class Customer(Base):
     address_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address_state: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address_zip: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    quickbooks_customer_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

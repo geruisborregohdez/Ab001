@@ -4,12 +4,12 @@ from pydantic import BaseModel, EmailStr
 
 class CustomerCreate(BaseModel):
     name: str
-    email: str | None = None
-    phone: str | None = None
-    address_street: str | None = None
-    address_city: str | None = None
-    address_state: str | None = None
-    address_zip: str | None = None
+    email: str
+    phone: str
+    address_street: str
+    address_city: str
+    address_state: str
+    address_zip: str
 
 
 class CustomerUpdate(BaseModel):
@@ -31,6 +31,7 @@ class CustomerRead(BaseModel):
     address_city: str | None
     address_state: str | None
     address_zip: str | None
+    quickbooks_customer_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
