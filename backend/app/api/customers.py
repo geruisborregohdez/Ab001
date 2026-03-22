@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -41,6 +42,12 @@ async def update_customer(customer_id: int, body: CustomerUpdate, db: AsyncSessi
 @router.delete("/{customer_id}", status_code=204)
 async def delete_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
     repo = CustomerRepository(db)
-    deleted = await repo.delete(customer_id)
+    try:
+        deleted = await repo.delete(customer_id)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete customer with existing services or invoices. Delete or reassign them first.",
+        )
     if not deleted:
         raise HTTPException(status_code=404, detail="Customer not found")

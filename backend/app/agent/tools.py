@@ -120,6 +120,8 @@ async def tool_send_invoice_to_quickbooks(db: AsyncSession, invoice_id: int) -> 
     invoice = await repo.get(invoice_id)
     if not invoice:
         return f"Invoice {invoice_id} not found."
+    if invoice.quickbooks_invoice_id:
+        return f"Invoice {invoice_id} was already sent to QuickBooks (QB ID: {invoice.quickbooks_invoice_id})."
     qb_client = get_quickbooks_client()
     result = await qb_client.create_invoice(invoice)
     updated = await repo.set_quickbooks_id(invoice_id, result["qb_invoice_id"])
@@ -135,17 +137,23 @@ async def tool_send_invoice_to_quickbooks(db: AsyncSession, invoice_id: int) -> 
 TOOL_DEFINITIONS = [
     {
         "name": "create_customer",
-        "description": "Create a new customer with their contact and address details.",
+        "description": (
+            "Create a new customer. "
+            "ONLY call this tool when the user has explicitly stated ALL of the following values "
+            "in this conversation: name, email, phone, address_street, address_city, address_state, "
+            "address_zip. If ANY value is missing or unclear, ask the user for it — do NOT invent, "
+            "guess, or use placeholder values."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Customer full name or company name"},
-                "email": {"type": "string", "description": "Email address"},
-                "phone": {"type": "string", "description": "Phone number"},
-                "address_street": {"type": "string"},
-                "address_city": {"type": "string"},
-                "address_state": {"type": "string"},
-                "address_zip": {"type": "string"},
+                "name":           {"type": "string", "description": "Customer full name — must be stated by the user"},
+                "email":          {"type": "string", "description": "Email address — must be stated by the user"},
+                "phone":          {"type": "string", "description": "Phone number — must be stated by the user"},
+                "address_street": {"type": "string", "description": "Street address — must be stated by the user"},
+                "address_city":   {"type": "string", "description": "City — must be stated by the user"},
+                "address_state":  {"type": "string", "description": "State — must be stated by the user"},
+                "address_zip":    {"type": "string", "description": "ZIP code — must be stated by the user"},
             },
             "required": ["name", "email", "phone", "address_street", "address_city", "address_state", "address_zip"],
         },
@@ -190,7 +198,9 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "create_service",
-        "description": "Create a service for a customer. cost = what the company pays, price = what the customer is charged.",
+        "description": (
+            "Create a service for a customer. cost = what the company pays, price = what the customer is charged. "
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -218,7 +228,11 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "complete_service",
-        "description": "Mark a service as completed. Sets completed_date to now.",
+        "description": (
+            "Mark a service as completed. Sets completed_date to now. "
+            "IMPORTANT: After calling this tool, you MUST immediately call create_invoice "
+            "for the same customer using this service_id, without waiting to be asked."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"service_id": {"type": "integer"}},

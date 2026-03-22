@@ -36,12 +36,24 @@ You have access to tools to:
 - Send invoices to QuickBooks
 
 STRICT RULES — never break these:
-1. NEVER invent, guess, or assume any field value (name, email, phone, address, cost, price, etc.).
-   If the user has not explicitly provided a value, you MUST ask for it before calling any tool.
-2. All required fields for create_customer are: name, email, phone, address_street, address_city,
-   address_state, address_zip. Ask for every missing field in a single message before proceeding.
-3. When listing results, present them clearly.
-4. When creating an invoice, first verify the services are completed or ask the user to confirm."""
+1. NEVER invent, guess, assume, or use placeholder/example values for any field
+   (name, email, phone, address, cost, price, etc.).
+   If the user has not explicitly stated a value in this conversation, you MUST ask for it.
+   Do NOT use values like "unknown@email.com", "123 Main St", "TBD", or similar stand-ins.
+2. For create_customer: ALL of name, email, phone, address_street, address_city, address_state,
+   address_zip must be explicitly provided by the user. Collect them in a single question if
+   multiple are missing. Do NOT call create_customer until every field has a real value
+   from the user.
+3. For create_service: ALWAYS call list_customers first to look up the customer.
+   - If exactly one customer matches, confirm their name with the user before proceeding.
+   - If multiple customers match, present the list to the user and ask them to pick the correct one.
+     Do NOT choose arbitrarily — wait for the user's confirmation before calling create_service.
+   - Do NOT call create_service with a customer_id you have not explicitly confirmed with the user.
+4. When listing results, present them clearly.
+5. When creating an invoice, first verify the services are completed or ask the user to confirm.
+6. After marking a service as `completed`, ALWAYS immediately create an invoice for that customer
+   using create_invoice — do not wait to be asked. Use the completed service as the line item.
+   After creating the invoice, ask the user whether they want to send it to QuickBooks now."""
 
 # In-memory session store: {session_id: [message_dicts]}
 # Swap: if SESSION_BACKEND=redis, use aioredis instead
@@ -62,11 +74,21 @@ def _to_openai_tools(anthropic_tools: list[dict]) -> list[dict]:
         for t in anthropic_tools
     ]
 
+# Pre-computed once — TOOL_DEFINITIONS never changes at runtime
+_GROQ_TOOLS = _to_openai_tools(TOOL_DEFINITIONS)
+_TOOL_REQUIRED: dict[str, list[str]] = {
+    t["name"]: t["input_schema"].get("required", [])
+    for t in TOOL_DEFINITIONS
+}
+
 
 async def _execute_tool(tool_name: str, tool_input: dict, db: AsyncSession) -> Any:
     handler = TOOL_HANDLERS.get(tool_name)
     if not handler:
         return f"Unknown tool: {tool_name}"
+    missing = [f for f in _TOOL_REQUIRED.get(tool_name, []) if f not in tool_input]
+    if missing:
+        return f"Missing required fields for {tool_name}: {', '.join(missing)}. Please ask the user to provide them."
     try:
         return await handler(db=db, **tool_input)
     except Exception as exc:
@@ -77,7 +99,6 @@ async def _execute_tool(tool_name: str, tool_input: dict, db: AsyncSession) -> A
 async def _chat_groq(history: list[dict], db: AsyncSession) -> tuple[str, list[dict]]:
     from groq import AsyncGroq
     client = AsyncGroq()
-    tools = _to_openai_tools(TOOL_DEFINITIONS)
     working = list(history)
 
     while True:
@@ -85,7 +106,7 @@ async def _chat_groq(history: list[dict], db: AsyncSession) -> tuple[str, list[d
         response = await client.chat.completions.create(
             model=GROQ_MODEL,
             messages=messages,
-            tools=tools,
+            tools=_GROQ_TOOLS,
             tool_choice="auto",
         )
         msg = response.choices[0].message

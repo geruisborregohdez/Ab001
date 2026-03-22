@@ -43,7 +43,8 @@ class InvoiceRepository:
         self.db.add(invoice)
         await self.db.commit()
         await self.db.refresh(invoice)
-        return invoice
+        # Re-fetch with eager loads so line_items are available outside the session
+        return await self.get(invoice.id)
 
     async def get(self, invoice_id: int) -> Invoice | None:
         result = await self.db.execute(
@@ -77,6 +78,14 @@ class InvoiceRepository:
         await self.db.commit()
         await self.db.refresh(invoice)
         return invoice
+
+    async def delete(self, invoice_id: int) -> bool:
+        invoice = await self.get(invoice_id)
+        if not invoice:
+            return False
+        await self.db.delete(invoice)
+        await self.db.commit()
+        return True
 
     async def set_quickbooks_id(self, invoice_id: int, qb_id: str) -> Invoice | None:
         invoice = await self.get(invoice_id)

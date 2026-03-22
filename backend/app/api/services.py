@@ -51,3 +51,18 @@ async def complete_service(service_id: int, db: AsyncSession = Depends(get_db)):
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
     return service
+
+
+@router.delete("/{service_id}", status_code=204)
+async def delete_service(service_id: int, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy.exc import IntegrityError
+    repo = ServiceRepository(db)
+    try:
+        deleted = await repo.delete(service_id)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete service linked to an existing invoice. Delete the invoice first.",
+        )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Service not found")

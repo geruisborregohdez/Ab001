@@ -56,6 +56,10 @@ def api_delete(path: str) -> bool:
         r = requests.delete(f"{BACKEND_URL}{path}", timeout=10)
         r.raise_for_status()
         return True
+    except requests.HTTPError:
+        detail = r.json().get("detail", "Request failed") if r.content else "Request failed"
+        st.error(detail)
+        return False
     except Exception as e:
         st.error(f"Request failed: {e}")
         return False
@@ -68,6 +72,9 @@ st.divider()
 
 tab_customers, tab_services, tab_invoices = st.tabs(["Customers", "Services", "Invoices"])
 
+# Load customers once per render — reused in all three tabs
+all_customers = api_get("/api/customers") or []
+
 
 # ── Customers ─────────────────────────────────────────────────────────────────
 with tab_customers:
@@ -78,7 +85,7 @@ with tab_customers:
         if st.button("Refresh", key="refresh_customers"):
             st.rerun()
 
-        customers = api_get("/api/customers") or []
+        customers = all_customers
         if customers:
             for c in customers:
                 with st.expander(f"**{c['name']}** — {c.get('email', '—')}"):
@@ -159,19 +166,36 @@ with tab_services:
                     cols[2].metric("Customer ID", s["customer_id"])
                     if s.get("description"):
                         st.write(s["description"])
+                    action_cols = st.columns(2)
                     if s["status"] != "completed":
-                        if st.button("Mark Complete", key=f"complete_{s['id']}"):
+                        if action_cols[0].button("Mark Complete", key=f"complete_{s['id']}"):
                             result = api_post(f"/api/services/{s['id']}/complete", {})
                             if result:
                                 st.success("Marked as completed.")
                                 st.rerun()
+
+                    confirm_key = f"svc_delete_confirm_{s['id']}"
+                    if st.session_state.get(confirm_key):
+                        st.warning(f"Delete **{s['name']}**? This cannot be undone.")
+                        btn_cols = st.columns(2)
+                        if btn_cols[0].button("Yes, delete", key=f"svc_delete_yes_{s['id']}", type="primary"):
+                            if api_delete(f"/api/services/{s['id']}"):
+                                st.success(f"Service **{s['name']}** deleted.")
+                                del st.session_state[confirm_key]
+                                st.rerun()
+                        if btn_cols[1].button("Cancel", key=f"svc_delete_cancel_{s['id']}"):
+                            del st.session_state[confirm_key]
+                            st.rerun()
+                    else:
+                        if action_cols[1].button("Delete", key=f"svc_delete_{s['id']}", type="secondary"):
+                            st.session_state[confirm_key] = True
+                            st.rerun()
         else:
             st.info("No services yet.")
 
     with col_form:
         st.subheader("New Service")
-        customers = api_get("/api/customers") or []
-        customer_options = {f"{c['name']} (ID:{c['id']})": c["id"] for c in customers}
+        customer_options = {f"{c['name']} (ID:{c['id']})": c["id"] for c in all_customers}
 
         with st.form("create_service", clear_on_submit=True):
             if customer_options:
@@ -227,19 +251,36 @@ with tab_invoices:
                     cols[2].write(f"**QB ID:** {i.get('quickbooks_invoice_id') or '—'}")
                     if i.get("notes"):
                         st.write(f"**Notes:** {i['notes']}")
+                    action_cols = st.columns(2)
                     if i["status"] != "paid":
-                        if st.button("Send to QuickBooks", key=f"qb_{i['id']}"):
-                            result = api_post(f"/api/invoices/{i['id']}/quickbooks", {})
+                        if action_cols[0].button("Send to QuickBooks", key=f"qb_{i['id']}"):
+                            result = api_post(f"/api/invoices/{i['id']}/send-to-quickbooks", {})
                             if result:
                                 st.success(f"Sent to QuickBooks: {result.get('qb_invoice_id')}")
                                 st.rerun()
+
+                    confirm_key = f"inv_delete_confirm_{i['id']}"
+                    if st.session_state.get(confirm_key):
+                        st.warning(f"Delete **{i['invoice_number']}**? This cannot be undone.")
+                        btn_cols = st.columns(2)
+                        if btn_cols[0].button("Yes, delete", key=f"inv_delete_yes_{i['id']}", type="primary"):
+                            if api_delete(f"/api/invoices/{i['id']}"):
+                                st.success(f"Invoice **{i['invoice_number']}** deleted.")
+                                del st.session_state[confirm_key]
+                                st.rerun()
+                        if btn_cols[1].button("Cancel", key=f"inv_delete_cancel_{i['id']}"):
+                            del st.session_state[confirm_key]
+                            st.rerun()
+                    else:
+                        if action_cols[1].button("Delete", key=f"inv_delete_{i['id']}", type="secondary"):
+                            st.session_state[confirm_key] = True
+                            st.rerun()
         else:
             st.info("No invoices yet.")
 
     with col_form:
         st.subheader("New Invoice")
-        customers = api_get("/api/customers") or []
-        customer_options = {f"{c['name']} (ID:{c['id']})": c["id"] for c in customers}
+        customer_options = {f"{c['name']} (ID:{c['id']})": c["id"] for c in all_customers}
 
         with st.form("create_invoice", clear_on_submit=True):
             if customer_options:

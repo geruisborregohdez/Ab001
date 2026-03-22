@@ -45,12 +45,23 @@ async def update_invoice_status(invoice_id: int, body: InvoiceStatusUpdate, db: 
     return invoice
 
 
+@router.delete("/{invoice_id}", status_code=204)
+async def delete_invoice(invoice_id: int, db: AsyncSession = Depends(get_db)):
+    repo = InvoiceRepository(db)
+    deleted = await repo.delete(invoice_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+
 @router.post("/{invoice_id}/send-to-quickbooks", response_model=InvoiceRead)
 async def send_to_quickbooks(invoice_id: int, db: AsyncSession = Depends(get_db)):
     repo = InvoiceRepository(db)
     invoice = await repo.get(invoice_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if invoice.quickbooks_invoice_id:
+        raise HTTPException(status_code=409, detail="Invoice already sent to QuickBooks")
 
     qb_client = get_quickbooks_client()
     result = await qb_client.create_invoice(invoice)

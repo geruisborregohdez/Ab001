@@ -42,6 +42,14 @@ class ServiceRepository:
         await self.db.refresh(service)
         return service
 
+    async def delete(self, service_id: int) -> bool:
+        service = await self.get(service_id)
+        if not service:
+            return False
+        await self.db.delete(service)
+        await self.db.commit()
+        return True
+
     async def complete(self, service_id: int) -> Service | None:
         service = await self.get(service_id)
         if not service:
