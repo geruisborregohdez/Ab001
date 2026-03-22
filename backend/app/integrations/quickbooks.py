@@ -13,6 +13,7 @@ Optional:
   QB_ENVIRONMENT    — "sandbox" or "production" (default: "sandbox")
 """
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -20,6 +21,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
+
+_TOKEN_FILE = os.path.join(os.path.dirname(__file__), "../../../../data/qb_tokens.json")
 
 
 class QuickBooksClient(ABC):
@@ -63,7 +66,7 @@ class StubQuickBooksClient(QuickBooksClient):
         return {"qb_customer_id": mock_id, "status": "synced"}
 
 
-class RealQuickBooksClient(QuickBooksClient):
+class RealQuickBooksClient(QuickBooksClient):  # pragma: no cover
     """
     Real QuickBooks integration via intuitlib + python-quickbooks.
 
@@ -85,20 +88,61 @@ class RealQuickBooksClient(QuickBooksClient):
         self._auth_client = AuthClient(
             client_id=self._client_id,
             client_secret=self._client_secret,
-            redirect_uri="http://localhost",  # required by intuitlib; unused here
+            redirect_uri="",  # not needed for refresh-token flow; used only by auth endpoints
             environment=environment,
             access_token=os.getenv("QB_ACCESS_TOKEN", ""),
-            refresh_token=os.environ["QB_REFRESH_TOKEN"],
+            refresh_token=os.getenv("QB_REFRESH_TOKEN", ""),
         )
+        # Override with persisted tokens if available (written by OAuth callback or after rotation)
+        persisted = self._load_persisted_token()
+        if persisted:
+            if persisted.get("refresh_token"):
+                self._auth_client.refresh_token = persisted["refresh_token"]
+            if persisted.get("access_token"):
+                self._auth_client.access_token = persisted["access_token"]
+            logger.info("[QB] Loaded tokens from %s", _TOKEN_FILE)
         # Track when the access token expires (None = unknown, refresh on first use)
         self._token_expiry: datetime | None = None
 
+    def _load_persisted_token(self) -> dict | None:
+        """Return saved token data from disk, or None if not found."""
+        try:
+            with open(_TOKEN_FILE) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def _persist_token(self, refresh_token: str) -> None:
+        """Write the rotated refresh + access tokens to disk so they survive restarts."""
+        os.makedirs(os.path.dirname(_TOKEN_FILE), exist_ok=True)
+        with open(_TOKEN_FILE, "w") as f:
+            json.dump(
+                {
+                    "refresh_token": refresh_token,
+                    "access_token": self._auth_client.access_token or "",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                f,
+            )
+        logger.info("[QB] Persisted rotated tokens to %s", _TOKEN_FILE)
+
     async def _ensure_valid_token(self) -> None:
         """Refresh the access token if it has expired or is about to expire."""
+        from intuitlib.exceptions import AuthClientError
+
         now = datetime.now(timezone.utc)
         if self._token_expiry is None or now >= self._token_expiry:
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._auth_client.refresh)
+            try:
+                await loop.run_in_executor(None, self._auth_client.refresh)
+            except AuthClientError as exc:
+                if "invalid_grant" in str(exc):
+                    raise RuntimeError(
+                        "QuickBooks refresh token is invalid or expired. "
+                        "Re-authorize at GET /api/auth/quickbooks"
+                    ) from exc
+                raise
+            self._persist_token(self._auth_client.refresh_token)
             # QB access tokens live 3600s; use 55 min to stay safe
             self._token_expiry = datetime.now(timezone.utc) + timedelta(minutes=55)
             logger.info("[QB] Access token refreshed; next refresh in ~55 min")
@@ -258,8 +302,18 @@ class RealQuickBooksClient(QuickBooksClient):
         return await loop.run_in_executor(None, _update)
 
 
+_qb_client: QuickBooksClient | None = None
+
+
 def get_quickbooks_client() -> QuickBooksClient:
-    mode = os.getenv("QB_MODE", "stub").lower()
-    if mode == "real":
-        return RealQuickBooksClient()
-    return StubQuickBooksClient()
+    global _qb_client
+    if _qb_client is None:
+        mode = os.getenv("QB_MODE", "stub").lower()
+        _qb_client = RealQuickBooksClient() if mode == "real" else StubQuickBooksClient()
+    return _qb_client
+
+
+def reset_quickbooks_client() -> None:
+    """Force the singleton to be recreated on next call (used after re-authorization)."""
+    global _qb_client
+    _qb_client = None
